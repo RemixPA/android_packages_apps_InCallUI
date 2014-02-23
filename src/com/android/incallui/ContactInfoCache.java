@@ -351,100 +351,99 @@ public class ContactInfoCache implements ContactsAsyncHelper.OnImageLoadComplete
         String label = null;
         boolean isSipCall = false;
 
-            // It appears that there is a small change in behaviour with the
-            // PhoneUtils' startGetCallerInfo whereby if we query with an
-            // empty number, we will get a valid CallerInfo object, but with
-            // fields that are all null, and the isTemporary boolean input
-            // parameter as true.
+        // It appears that there is a small change in behaviour with the
+        // PhoneUtils' startGetCallerInfo whereby if we query with an
+        // empty number, we will get a valid CallerInfo object, but with
+        // fields that are all null, and the isTemporary boolean input
+        // parameter as true.
 
-            // In the past, we would see a NULL callerinfo object, but this
-            // ends up causing null pointer exceptions elsewhere down the
-            // line in other cases, so we need to make this fix instead. It
-            // appears that this was the ONLY call to PhoneUtils
-            // .getCallerInfo() that relied on a NULL CallerInfo to indicate
-            // an unknown contact.
+        // In the past, we would see a NULL callerinfo object, but this
+        // ends up causing null pointer exceptions elsewhere down the
+        // line in other cases, so we need to make this fix instead. It
+        // appears that this was the ONLY call to PhoneUtils
+        // .getCallerInfo() that relied on a NULL CallerInfo to indicate
+        // an unknown contact.
 
-            // Currently, infi.phoneNumber may actually be a SIP address, and
-            // if so, it might sometimes include the "sip:" prefix. That
-            // prefix isn't really useful to the user, though, so strip it off
-            // if present. (For any other URI scheme, though, leave the
-            // prefix alone.)
-            // TODO: It would be cleaner for CallerInfo to explicitly support
-            // SIP addresses instead of overloading the "phoneNumber" field.
-            // Then we could remove this hack, and instead ask the CallerInfo
-            // for a "user visible" form of the SIP address.
-            String number = info.phoneNumber;
+        // Currently, infi.phoneNumber may actually be a SIP address, and
+        // if so, it might sometimes include the "sip:" prefix. That
+        // prefix isn't really useful to the user, though, so strip it off
+        // if present. (For any other URI scheme, though, leave the
+        // prefix alone.)
+        // TODO: It would be cleaner for CallerInfo to explicitly support
+        // SIP addresses instead of overloading the "phoneNumber" field.
+        // Then we could remove this hack, and instead ask the CallerInfo
+        // for a "user visible" form of the SIP address.
+        String number = info.phoneNumber;
 
-            if (!TextUtils.isEmpty(number)) {
-                isSipCall = PhoneNumberUtils.isUriNumber(number);
-                if (number.startsWith("sip:")) {
-                    number = number.substring(4);
-                }
+        if (!TextUtils.isEmpty(number)) {
+            isSipCall = PhoneNumberUtils.isUriNumber(number);
+            if (number.startsWith("sip:")) {
+                number = number.substring(4);
             }
+        }
 
-            if (TextUtils.isEmpty(info.name)) {
-                // No valid "name" in the CallerInfo, so fall back to
-                // something else.
-                // (Typically, we promote the phone number up to the "name" slot
-                // onscreen, and possibly display a descriptive string in the
-                // "number" slot.)
-                if (TextUtils.isEmpty(number)) {
-                    // No name *or* number! Display a generic "unknown" string
-                    // (or potentially some other default based on the presentation.)
-                    displayName = getPresentationString(context, presentation);
-                    Log.d(TAG, "  ==> no name *or* number! displayName = " + displayName);
-                } else if (presentation != Call.PRESENTATION_ALLOWED) {
-                    // This case should never happen since the network should never send a phone #
-                    // AND a restricted presentation. However we leave it here in case of weird
-                    // network behavior
-                    displayName = getPresentationString(context, presentation);
-                    Log.d(TAG, "  ==> presentation not allowed! displayName = " + displayName);
-                } else if (!TextUtils.isEmpty(info.cnapName)) {
-                    // No name, but we do have a valid CNAP name, so use that.
-                    displayName = info.cnapName;
-                    info.name = info.cnapName;
-                    displayNumber = number;
-                    Log.d(TAG, "  ==> cnapName available: displayName '" + displayName +
-                            "', displayNumber '" + displayNumber + "'");
-                } else {
-                    // No name; all we have is a number. This is the typical
-                    // case when an incoming call doesn't match any contact,
-                    // or if you manually dial an outgoing number using the
-                    // dialpad.
-                    displayNumber = number;
-
-                    // Display a geographical description string if available
-                    // (but only for incoming calls.)
-                    if (isIncoming) {
-                        // TODO (CallerInfoAsyncQuery cleanup): Fix the CallerInfo
-                        // query to only do the geoDescription lookup in the first
-                        // place for incoming calls.
-                        displayLocation = info.geoDescription; // may be null
-                        Log.d(TAG, "Geodescrption: " + info.geoDescription);
-                    }
-
-                    Log.d(TAG, "  ==>  no name; falling back to number:"
-                            + " displayNumber '" + displayNumber
-                            + "', displayLocation '" + displayLocation + "'");
-                }
+        if (TextUtils.isEmpty(info.name)) {
+            // No valid "name" in the CallerInfo, so fall back to
+            // something else.
+            // (Typically, we promote the phone number up to the "name" slot
+            // onscreen, and possibly display a descriptive string in the
+            // "number" slot.)
+            if (TextUtils.isEmpty(number)) {
+                // No name *or* number! Display a generic "unknown" string
+                // (or potentially some other default based on the
+                // presentation.)
+                displayName = getPresentationString(context, presentation);
+                Log.d(TAG, "  ==> no name *or* number! displayName = " + displayName);
+            } else if (presentation != Call.PRESENTATION_ALLOWED) {
+                // This case should never happen since the network should never
+                // send a phone #
+                // AND a restricted presentation. However we leave it here in
+                // case of weird
+                // network behavior
+                displayName = getPresentationString(context, presentation);
+                Log.d(TAG, "  ==> presentation not allowed! displayName = " + displayName);
+            } else if (!TextUtils.isEmpty(info.cnapName)) {
+                // No name, but we do have a valid CNAP name, so use that.
+                displayName = info.cnapName;
+                info.name = info.cnapName;
+                displayNumber = number;
+                Log.d(TAG, "  ==> cnapName available: displayName '" + displayName +
+                        "', displayNumber '" + displayNumber + "'");
             } else {
-                // We do have a valid "name" in the CallerInfo. Display that
-                // in the "name" slot, and the phone number in the "number" slot.
-                if (presentation != Call.PRESENTATION_ALLOWED) {
-                    // This case should never happen since the network should never send a name
-                    // AND a restricted presentation. However we leave it here in case of weird
-                    // network behavior
-                    displayName = getPresentationString(context, presentation);
-                    Log.d(TAG, "  ==> valid name, but presentation not allowed!" +
-                            " displayName = " + displayName);
-                } else {
-                    displayName = info.name;
-                    displayNumber = number;
-                    label = info.phoneLabel;
-                    Log.d(TAG, "  ==>  name is present in CallerInfo: displayName '" + displayName
-                            + "', displayNumber '" + displayNumber + "'");
-                }
+                // No name; all we have is a number. This is the typical
+                // case when an incoming call doesn't match any contact,
+                // or if you manually dial an outgoing number using the
+                // dialpad.
+                displayNumber = number;
+
+                // Display a geographical description string if available
+                displayLocation = info.geoDescription;
+
+                Log.d(TAG, "  ==>  no name; falling back to number:"
+                        + " displayNumber '" + displayNumber
+                        + "', displayLocation '" + displayLocation + "'");
             }
+        } else {
+            // We do have a valid "name" in the CallerInfo. Display that
+            // in the "name" slot, and the phone number in the "number" slot.
+            if (presentation != Call.PRESENTATION_ALLOWED) {
+                // This case should never happen since the network should never
+                // send a name
+                // AND a restricted presentation. However we leave it here in
+                // case of weird
+                // network behavior
+                displayName = getPresentationString(context, presentation);
+                Log.d(TAG, "  ==> valid name, but presentation not allowed!" +
+                        " displayName = " + displayName);
+            } else {
+                displayName = info.name;
+                displayNumber = number;
+                displayLocation = info.geoDescription;
+                label = info.phoneLabel + " " + displayLocation;
+                Log.d(TAG, "  ==>  name is present in CallerInfo: displayName '" + displayName
+                        + "', displayNumber '" + displayNumber + "', displayLocation '" + displayLocation + "'");
+            }
+        }
 
         cce.name = displayName;
         cce.number = displayNumber;
