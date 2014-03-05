@@ -1,4 +1,8 @@
 /*
+ * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ * Not a Contribution, Apache license notifications and license are retained
+ * for attribution purposes only.
+ *
  * Copyright (C) 2013 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,6 +25,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
 import android.graphics.Bitmap;
+import android.provider.MediaStore.Audio;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
@@ -36,6 +41,7 @@ import com.android.services.telephony.common.Call;
 import com.android.services.telephony.common.Call.Capabilities;
 import com.android.services.telephony.common.CallIdentification;
 import com.google.common.base.Preconditions;
+import com.android.incallui.CallUtils;
 
 /**
  * Presenter for the Call Card Fragment.
@@ -150,6 +156,7 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
         Log.d(this, "Secondary call: " + secondary);
 
         final boolean primaryChanged = !areCallsSame(mPrimary, primary);
+        final boolean primaryForwardedChanged = isForwarded(mPrimary) != isForwarded(primary);
         final boolean secondaryChanged = !areCallsSame(mSecondary, secondary);
         mSecondary = secondary;
         mPrimary = primary;
@@ -158,8 +165,10 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
             // primary call has changed
             mPrimaryContactInfo = ContactInfoCache.buildCacheEntryFromCall(mContext,
                     mPrimary.getIdentification(), mPrimary.getState() == Call.State.INCOMING);
-            updatePrimaryDisplayInfo(mPrimaryContactInfo, isConference(mPrimary));
             maybeStartSearch(mPrimary, true);
+        }
+        if ((primaryChanged || primaryForwardedChanged) && mPrimary != null) {
+            updatePrimaryDisplayInfo(mPrimaryContactInfo, isConference(mPrimary));
         }
 
         if (mSecondary == null) {
@@ -185,13 +194,16 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
         }
 
         // Set the call state
+        final int callType = CallUtils.getCallType(mPrimary);
+
         if (mPrimary != null) {
             final boolean bluetoothOn =
                     (AudioModeProvider.getInstance().getAudioMode() == AudioMode.BLUETOOTH);
             ui.setCallState(mPrimary.getState(), mPrimary.getDisconnectCause(), bluetoothOn,
-                    getGatewayLabel(), getGatewayNumber());
+                    getGatewayLabel(), getGatewayNumber(), mPrimary.isHeldRemotely(), callType);
         } else {
-            ui.setCallState(Call.State.IDLE, Call.DisconnectCause.UNKNOWN, false, null, null);
+            ui.setCallState(Call.State.IDLE, Call.DisconnectCause.UNKNOWN,
+                    false, null, null, false, callType);
         }
     }
 
@@ -201,7 +213,8 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
             final boolean bluetoothOn = (AudioMode.BLUETOOTH == mode);
 
             getUi().setCallState(mPrimary.getState(), mPrimary.getDisconnectCause(), bluetoothOn,
-                    getGatewayLabel(), getGatewayNumber());
+                    getGatewayLabel(), getGatewayNumber(), mPrimary.isHeldRemotely(),
+                    CallUtils.getCallType(mPrimary));
         }
     }
 
@@ -236,7 +249,8 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
         }
 
         // otherwise compare call Ids
-        return call1.getCallId() == call2.getCallId();
+        return (call1.getCallId() == call2.getCallId()) &&
+                call1.getCallDetails().isMpty() == call2.getCallDetails().isMpty();
     }
 
     private void maybeStartSearch(Call call, boolean isPrimary) {
@@ -272,7 +286,8 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
                         return;
                     }
                     if (entry.photo != null) {
-                        if (mPrimary != null && callId == mPrimary.getCallId()) {
+                        if (mPrimary != null && !CallUtils.isVideoCall(mPrimary) &&
+                                callId == mPrimary.getCallId()) {
                             getUi().setPrimaryImage(entry.photo);
                         } else if (mSecondary != null && callId == mSecondary.getCallId()) {
                             getUi().setSecondaryImage(entry.photo);
@@ -288,6 +303,10 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
 
     private static boolean isGenericConference(Call call) {
         return call != null && call.can(Capabilities.GENERIC_CONFERENCE);
+    }
+
+    private static boolean isForwarded(Call call) {
+        return call != null && call.isForwarded();
     }
 
     private void updateContactEntry(ContactCacheEntry entry, boolean isPrimary,
@@ -354,14 +373,18 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
         }
 
         final boolean isGenericConf = isGenericConference(mPrimary);
+        final boolean isForwarded = isForwarded(mPrimary);
+        final boolean isVideo = CallUtils.isVideoCall(mPrimary);
         if (entry != null) {
             final String name = getNameForCall(entry);
             final String number = getNumberForCall(entry);
             final boolean nameIsNumber = name != null && name.equals(entry.number);
             ui.setPrimary(number, name, nameIsNumber, entry.label,
-                    entry.photo, isConference, isGenericConf, entry.isSipCall);
+                    entry.photo, isConference, isGenericConf,
+                    entry.isSipCall, isForwarded, isVideo);
         } else {
-            ui.setPrimary(null, null, false, null, null, isConference, isGenericConf, false);
+            ui.setPrimary(null, null, false, null, null, isConference,
+                    isGenericConf, false, isForwarded, isVideo);
         }
 
     }
@@ -458,16 +481,21 @@ public class CallCardPresenter extends Presenter<CallCardPresenter.CallCardUi>
     public interface CallCardUi extends Ui {
         void setVisible(boolean on);
         void setPrimary(String number, String name, boolean nameIsNumber, String label,
-                Drawable photo, boolean isConference, boolean isGeneric, boolean isSipCall);
+                Drawable photo, boolean isConference, boolean isGeneric,
+                boolean isSipCall, boolean isForwarded, boolean isVideo);
         void setSecondary(boolean show, String name, boolean nameIsNumber, String label,
                 Drawable photo, boolean isConference, boolean isGeneric);
         void setSecondaryImage(Drawable image);
         void setCallState(int state, Call.DisconnectCause cause, boolean bluetoothOn,
-                String gatewayLabel, String gatewayNumber);
+                String gatewayLabel, String gatewayNumber, boolean isHeldRemotely, int callType);
         void setPrimaryCallElapsedTime(boolean show, String duration);
         void setPrimaryName(String name, boolean nameIsNumber);
         void setPrimaryImage(Drawable image);
         void setPrimaryPhoneNumber(String phoneNumber);
         void setPrimaryLabel(String label);
+    }
+
+    public int getActiveSubscription() {
+        return CallCommandClient.getInstance().getActiveSubscription();
     }
 }
